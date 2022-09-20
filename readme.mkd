@@ -1,0 +1,301 @@
+# Component State.
+
+## Overview:
+
+I decided that it would be easier to provide a working implementation of the example that you sent me. The documentation that I initially started writing lacked context and as a result became difficult to reason about. Each screen in the application contains a working example that illustrates how the component's state can be managed. Detailed explanations for each example can be found below.
+I managed to get the examples to work using a class instance but would not recommend this design pattern. Read the section title "The Problem".
+I used `TailwindCSS` for rapid prototyping. Don't worry about styling conventions used, just pay attention to the applications logic. The interface wasn't a priority so don't judge me too harshly.
+I would recommend that you superset your JavaScript with TypeScript or Flow. The issues discussed below are easier to identify when static type checking is enforced.
+
+## Prerequisites:
+
+1. Install the required dependencies:
+
+```shell
+npm install
+```
+
+2. Build the application:
+
+```shell
+npm start
+```
+
+## The Problem:
+
+React is heavily opinionated with regards to how a component's state is mutated. Instantiating a component's state using a class instance is acceptable, however, attempting to mutate that state using an instance method is counterintuitive because react already provides a destructured function for that purpose. Declaring a state variable without using the `useState` & `useReducer` hooks will bypass the algorithm that react uses to update the rendered output and is therefore discouraged. The problem occurs because both the destructured function and the instance method are attempting to update the same state variable. The method defined in the class can easily be modified to circumnavigate this issue but the functions returned from `useState` and `useReducer` cannot. Consider the following:
+
+```jsx
+class CountClass {
+	constructor(initial) {
+		this.count = initial;
+	}
+	increment() {
+		this.count++;
+	}
+}
+
+const CountComponent = () => {
+	const [instance, setInstance] = useState(new CountClass(1))
+	return (
+		<div>
+			<p>{instance.count}</p>
+			<button onClick={() => {...}}>Increment</button>
+		<div>
+	)
+}
+```
+
+`{instance.count}` will render the `count` variable without issue. The problem arises when we attempt to mutate the `count` variable by invoking the callback in the `onClick` attribute of the `<button>` element.
+
+`count` can technically be mutated by doing the following:
+
+```jsx
+<button onClick={() => instance.increment()}>Increment</button>
+```
+
+This approach is heavily discouraged because the updated value will not be displayed to the client. React is unaware that `count` has changed and therefore **will not** trigger a re-render of the component. The component now contains what is commonly referred to as "stale" or "out-of-sync" state.
+
+The only way to resolve this issue is by using the function returned from `useState`. As mentioned earlier, problems begin to arise when you attempt to use `instance.increment` inside of the `setInstance` function. It does not make sense to use two functions to update the same state variable. The problem is compounded by the arguments that `setInstance` accepts. Providing these arguments through the use of an instance method proves to be very troublesome and error prone.
+I managed to hack my way around this issue in both the first and second examples but would not recommend the techniques used, especially when large datasets are concerned.
+
+There is a straight forward solution to this problem but I would also not recommend it:
+
+```jsx
+...
+setInstance((previous) => {
+	const recreated = new CountClass(previous.count);
+	recreated.increase();
+	return recreated;
+});
+```
+
+A new instance will be created every time `count` is increased. Although JavaScript does perform automatic garbage collection it could still potentially lead to memory leaks and performance issues.
+
+### Failing Procedures.
+
+Below are some examples of the procedures that will result in a TypeError. I have included them to help you get a better understanding of the problem.
+
+1. Invoking the instance method and passing it as an argument to `setInstance`:
+
+```js
+setInstance(instance.increment());
+```
+
+`increment` does not return a value so `setInstance` won't have a value to update the state variable with.
+
+2. Refactoring the class method to return a value:
+
+```js
+class CountClass {
+	...
+	increment() {
+		this.count++;
+		return count;
+	}
+}
+
+setInstance(instance.increment());
+```
+
+The incremented value of `instance.count` is returned but `setInstance` does not know which instance property to assign it to.
+
+Attempting to implicitly assign the returned value to the `instance.count` property also has no effect.
+
+```js
+setInstance({ count: instance.increment() });
+```
+
+3. Adding accessors to the class:
+
+```jsx
+class CountClass {
+	...
+	increment() {
+		this.count++
+	}
+	get amount() {
+		return this.count
+	}
+}
+
+const CountClass = () => {
+	...
+	increase() {
+		instance.increment();
+		setInstance(instance.amount)
+	}
+	return (
+		<div>
+			...
+			<button onClick={increase} />
+		</div>
+	)
+}
+```
+
+Explicitly assigning the value returned from the getter to `instance.count` also won't work:
+
+```js
+increase() {
+	...
+	setInstance({ count: instance.amount })
+}
+```
+
+4. Invoking the method on the previous instance:
+
+```js
+setInstance((previous) => previous.increment());
+```
+
+This example is almost identical to the first one. There is no value being returned in the callback so `setInstance` has nothing to assign.
+
+5. Invoking accessors in the callback:
+
+```js
+class CountClass {
+	...
+	get amount() {
+		return this.count;
+	}
+}
+
+const CountClass = () => {
+	...
+	increase() {
+		setInstance((previous) => {
+			previous.increase();
+			return previous.amount
+		})
+	}
+	return (
+		...
+	)
+}
+```
+
+The problem with this procedure is that we are operating on and returning the previous state.
+
+Operating on the "current" instance will also not work:
+
+```js
+	...
+	increase() {
+		setInstance(() => {
+			instance.increase();
+			return instance.amount
+		})
+	}
+```
+
+6. Merging objects.
+
+```js
+setInstance((previous) => {
+	previous.increment();
+	return { ...previous, count: previous.amount };
+});
+```
+
+The problem with the above extract is that we are updating the previous instance and then merging it with the exact same instance, which doesn't make sense.
+
+Note: `Object.assign({}, previous, count: previous.amount)` can also be used but will result in the same error.
+
+7. Merging the previous instance with the `instance` state variable
+
+```js
+setInstance((previous) => {
+	instance.increment();
+	return { ...previous, count: instance.amount };
+});
+```
+
+The above is counterintuitive because `previous` and `instance` point to the same object.
+
+### Verdict:
+
+When operating on a class instance, as you may have noticed, you are required to pass the instance as an argument in order to access the methods associated with it. This makes it difficult to use the function returned from `useState`. The fact that the callback only makes the previous state available as a parameter only further compounds the problem.
+The engineers who designed the hook probably didn't fully account for this particular use case or considered it bad practice to begin with and therefore never made the correct provisions.
+I personally would discourage using class methods to update the components state. If your application absolutely must rely on a method to mutate the state then I would suggest creating stateless components that have their state managed by your server-side logic.
+
+### Recommended solution:
+
+```js
+class CountClass {
+	constructor(initial) {
+		this.count = initial;
+	}
+}
+
+const CountComponent = () => {
+	const [instance, setInstance] = useState(new ExampleClass(1));
+
+	return (
+		<div>
+			<p>{instance.count}</p>
+			<button
+				onClick={() =>
+					setInstance((previous) => ({ count: previous.count++ }))
+				}
+			>
+				Increment
+			</button>
+		</div>
+	);
+};
+```
+
+## First Example.
+
+The first example uses the `useState` hook to manage the component's state. It might be beneficial to have a look at the class defined in `./src/CollectionClass.js` before attempting to digest the process that the `FirstExampleScreen` component undergoes. I designed the class to contain a private variable called `#list`. This design choice prevents the variable from being directly mutated by external procedures that consume the instance. I created getter and setter methods to update the instance variable in a safe and predictable manner.
+
+### Procedure:
+
+1. An instance of the `CollectionClass` is instantiated with a default value.
+
+```js
+const instance = new CollectionClass(1, 2, 3);
+```
+
+2. The value returned from the call to the getter method is passed as the initial value to `useState`. `list` will be mapped in the rendered output to display all the elements in the array, `{list.map(() => ())}`
+
+```js
+const [list, setList] = useState(instance.collection);
+```
+
+3. The `input` variable is instantiated to hold the clients selection. This is the value that will be added to the array.
+
+```js
+const [input, setInput] = useState(undefined);
+```
+
+4. The `addToList` function will be invoked once the client submits the form. The process is as follows:
+
+`event.preventDefault()` prevents the page from being refreshed when the user clicks the button. This is necessary because both the `input` value and the `event` object will be lost.
+
+The `input` value is then assigned to the setter. Pay attention to how the method is overloaded and assigned, `instance.collection = input`
+
+A call to `setInstance` is made and it's callback invoked. The previous instance is spread into a new array. A call to the getter is then made to return the last value that was added to the array (`instance.collection.at(-1)`). This values is then merged to produce a new array that includes the clients input. (`[...previous, value]`).
+
+The inputs value is reset and the placeholder re-rendered. This step prevents the same value from being re-added and allows the client to add a new one.
+
+5. React is notified that the components state has changed and triggers a re-render. `list.map` will be evaluated again to display the change.
+
+## Second Example:
+
+The second example uses the `useReducer` hook to manage the component's state. This method is preferred when working with complex data structures like heavily nested objects. The procedure `SecondExampleScreen` follows is almost identical to the one described above with the only noticeable difference being the inclusion of the `reducer` and `dispatch` functions.
+
+### Procedure:
+
+`useReducer` is instantiated with a reducer function and the value returned from the instance getter. The `state` variable and a `dispatch` function are destructured from the instantiation. The `dispatch` function will be called when `addToState` is invoked. `dispatch` accepts an `action` object as an argument. The action object generally adheres to the following shape:
+
+```js
+interface IAction {
+	type: string;
+	payload: any;
+}
+```
+
+The `type` property tells the `switch` statement which `case` to execute. The `payload` property is used to pass additional information that the `reducer` might need to calculate the return value, which in this case is the `input` variable.
+When evaluated, the `"add"` case will return an array that includes the `input`. This returned array will then be set as the value of the `state` value.

@@ -1,25 +1,20 @@
-import logo from './logo.svg';
-import './App.css';
+import { Routes, Route } from "react-router-dom";
+import {
+	LandingScreen,
+	FirstExampleScreen,
+	SecondExampleScreen,
+} from "./screens";
 
 function App() {
-  return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
-  );
+	return (
+		<div className="absolute h-full w-full flex">
+			<Routes>
+				<Route path="/" element={<LandingScreen />} />
+				<Route path="first" element={<FirstExampleScreen />} />
+				<Route path="second" element={<SecondExampleScreen />} />
+			</Routes>
+		</div>
+	);
 }
 
 export default App;
